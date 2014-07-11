@@ -1,8 +1,11 @@
+#!/usr/bin/env python
 import os
 import sys
 import subprocess
 import pprint
 import argparse
+import time
+import datetime
 from xml.dom.minidom import *
 
 
@@ -258,6 +261,12 @@ class Interface:
         else:
             return self.error_color('Unknown!')
 
+    def msec_to_sec(self, msec):
+        try:
+           return str(float(msec) / 1000) + ' s'
+        except:
+           return '?'
+
     def print_resource(self, resource, offset=4):
         """
         Print resource description block
@@ -269,6 +278,16 @@ class Interface:
         line = "> %(id)s (%(class)s::%(provider)s::%(type)s)" % resource
         self.puts(line, offset)
 
+    def sec_since(self, timestamp):
+        try:
+            timestamp = int(timestamp)
+            current_timestamp = time.time()
+            seconds_since = current_timestamp - timestamp
+            datetime_since = datetime.timedelta(seconds=seconds_since)
+            return str(datetime_since)
+        except:
+            return timestamp
+
     def print_op(self, op, offset=8):
         """
         Print operation description block
@@ -276,9 +295,16 @@ class Interface:
         @param offset:
         """
         op = op.copy()
-        op['rc-code-string'] = self.rc_code_to_string(op['rc-code'])
-        line = '* %(id)s %(rc-code-string)s' % op
+        self.debug(str(op), 3)
+        op['rc-code-string'] = self.rc_code_to_string(op.get('rc-code', '?'))
+        op['exec-time-sec'] = self.msec_to_sec(op.get('exec-time', '?'))
+        op['last-run-sec'] = self.sec_since(op.get('last-run', '?'))
+        op['last-rc-change-sec'] = self.sec_since(op.get('last-rc-change', '?'))
+        op['interval-sec'] = self.msec_to_sec(op.get('interval', '?'))
+        line = '* %(operation)s %(rc-code-string)s' % op
         self.puts(line, offset)
+        line = 'Origin: %(crm-debug-origin)s Run: %(last-run-sec)s Change: %(last-rc-change-sec)s Exec: %(exec-time-sec)s Interval: %(interval-sec)s' % op
+        self.puts(line, offset + 2)
 
     def print_node(self, node):
         """
@@ -340,22 +366,25 @@ class CIB:
         """
         shell = False
         cmd = ['/usr/sbin/cibadmin', '--query']
-        
-        popen = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            shell=shell,
-        )
+        exception = 'Could not get CIB using cibadmin!'       
+ 
+        try:
+            popen = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                shell=shell,
+            )
 
-        status_code = popen.wait()
-        stdout = popen.stdout
-        #stderr = popen.stderr
+            status_code = popen.wait()
+            stdout = popen.stdout
+            #stderr = popen.stderr
 
-        cib = stdout.read()
-        
+            cib = stdout.read()
+        except:
+            raise StandardError(exception)
         if status_code != 0 or len(cib) == 0:
-            raise StandardError('Could not get CIB using cibadmin!')
+            raise StandardError(exception)
         else:
             self.xml = xml.dom.minidom.parseString(cib)
             return self.xml
