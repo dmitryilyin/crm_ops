@@ -197,7 +197,7 @@ class Interface:
 
         self.parser = argparse.ArgumentParser()
         self.parser.add_argument("-d", "--debug", help="debug output", type=int, choices=[0, 1, 2, 3], default=0)
-        self.parser.add_argument("-v", "--verbose", help="show more information", action='store_true')
+        self.parser.add_argument("-v", "--verbose", help="show more information (timings)", action='store_true')
         self.parser.add_argument("-n", "--node", help="filter by node name", type=str)
         self.parser.add_argument("-p", "--primitive", help="filter by primitive name", type=str)
         self.parser.add_argument("-f", "--file", help="read CIB from file instead of Pacemaker", type=str)
@@ -222,9 +222,9 @@ class Interface:
     def debug(self, msg='', debug=1, offset=None):
         """
         Debug print string
-        @param msg:
-        @param debug:
-        @param offset:
+        @param msg: Message to write
+        @param debug: Minimum debug level this message should be shown
+        @param offset: Number of spaces before the message
         """
         if not offset:
             offset = debug
@@ -234,24 +234,24 @@ class Interface:
 
     def puts(self, msg='', offset=0):
         """
-        Print string
-        @param msg:
-        @param offset:
+        Print a string
+        @param msg: String to print
+        @param offset: Number of spaces before the string
         """
         sys.stdout.write('  ' * offset + str(msg) + "\n")
 
     def output(self, msg=''):
         """
-        Print string without newline
-        @param msg:
+        Print string without newline at the end
+        @param msg: String to print
         """
         sys.stdout.write(str(msg))
 
     def rc_code_to_string(self, rc_code):
         """
         Convert rc_code number to human-readable string
-        @param rc_code:
-        @return:
+        @param rc_code: Return code (one digit)
+        @return: Colored operation status string
         """
         rc_code = str(rc_code)
         if rc_code in self.ocf_rc_codes:
@@ -260,6 +260,12 @@ class Interface:
             return self.error_color('Unknown!')
 
     def status_color(self, status, line):
+        """
+        Colorize a line according to the resource status
+        @param status: Resource status string
+        @param line: A line to be colorized
+        @return: Colorized line
+        """
         status = str(status)
         line = str(line)
         if status in ['promote', 'start']:
@@ -272,8 +278,8 @@ class Interface:
     def print_resource(self, resource, offset=4):
         """
         Print resource description block
-        @param resource:
-        @param offset:
+        @param resource: Resource structure
+        @param offset: Number of spaces before the block
         """
         resource = resource.copy()
         resource['id'] = self.status_color(resource['status'], resource['id'])
@@ -282,6 +288,13 @@ class Interface:
         self.puts(line, offset)
 
     def seconds_to_time(self, seconds_from, seconds_to=None, msec=False):
+        """
+        Convert two timestampt to human-readable time delta between them
+        @param seconds_from: timestamp to count from
+        @param seconds_to: timestamp to coumt to (default: now)
+        @param msec: input is in miliseconds instead of seconds
+        @return: String of time delta
+        """
         seconds_in_day = 86400
         seconds_in_hour = 3600
         seconds_in_minute = 60
@@ -350,8 +363,8 @@ class Interface:
     def print_op(self, op, offset=8):
         """
         Print operation description block
-        @param op:
-        @param offset:
+        @param op: Operation structure
+        @param offset: Number of spaces before the string
         """
         op = op.copy()
         self.debug(str(op), 3)
@@ -379,7 +392,11 @@ class Interface:
             if 'last-rc-change' in op:
                 op['last-rc-change-sec'] = self.seconds_to_time(op['last-rc-change'])
 
-            line = 'Origin: %(crm-debug-origin)s' % op
+            line = ''
+            #
+            # if 'crm-debug-origin' in op:
+            #     line += 'Origin: %(crm-debug-origin)s' % op
+
             if 'last-run-sec' in op:
                 line += ' LastRun: %(last-run-sec)s' % op
 
@@ -397,7 +414,7 @@ class Interface:
     def print_node(self, node):
         """
         Print node description block
-        @param node:
+        @param node: Node structure
         """
         line = '%s\n%s\n%s' % (40 * '=', node['id'], 40 * '=')
         self.puts(line)
@@ -426,7 +443,7 @@ class CIB:
     def show_nodes(self):
         """
         Return pretty printed node structure for debug purpose
-        @return:
+        @return: Pretty-printed nodes structure
         """
         printer = pprint.PrettyPrinter(indent=2)
         return printer.pformat(self.nodes)
@@ -440,17 +457,19 @@ class CIB:
     def get_cib_from_file(self, cib_file=None):
         """
         Get cib XML DOM structure by reading xml file
-        @param cib_file:
+        @param cib_file: Path to file (cibadmin -Q > cib.xml)
+        @return: XML document
         """
         self.cib_file = cib_file
         self.xml = xml.dom.minidom.parse(self.cib_file)
         if not self.xml:
             raise StandardError('Could not get CIB from file!')
+        return self.xml
 
     def get_cib_from_pacemaker(self):
         """
         Get cib XML DOM from Pacemaker by calling cibadmin
-        @return: @raise:
+        @return: XML document
         """
         shell = False
         cmd = ['/usr/sbin/cibadmin', '--query']
@@ -475,13 +494,15 @@ class CIB:
             raise StandardError(exception)
         else:
             self.xml = xml.dom.minidom.parseString(cib)
-            return self.xml
+        if not self.xml:
+            raise StandardError('Could not get CIB from pacemaker!')
+        return self.xml
 
     def decode_lrm_op(self, lrm_op_block):
         """
         Decode operation block of lrm section
-        @param lrm_op_block:
-        @return:
+        @param lrm_op_block: Op block of the XML document
+        @return: Operation structure
         """
         op = {}
         for op_attribute in lrm_op_block.attributes.keys():
@@ -491,8 +512,8 @@ class CIB:
     def decode_lrm_resource(self, lrm_resource_block):
         """
         Decode resource block of lrm section
-        @param lrm_resource_block:
-        @return:
+        @param lrm_resource_block: Resource block of the XML document
+        @return: Resource structure
         """
         resource = {}
 
@@ -509,7 +530,7 @@ class CIB:
             self.interface.debug('Op: %s' % op['id'], 2, 3)
             resource['ops'].append(op)
 
-        resource['ops'].sort(key=lambda o: o.get('call_id', '0'))
+        resource['ops'].sort(key=lambda o: o.get('call-id', '0'))
         resource['status'] = self.determine_resource_status(resource['ops'])
 
         return resource
@@ -517,8 +538,8 @@ class CIB:
     def decode_lrm_node(self, lrm_node_block):
         """
         Decode node block of lrm section
-        @param lrm_node_block:
-        @return:
+        @param lrm_node_block: Node block of the XML document
+        @return: Node structure
         """
         node_data = {}
 
@@ -541,7 +562,7 @@ class CIB:
     def decode_lrm(self):
         """
         Find lrm sections and decode them
-        @return:
+        @return: Nodes structure
         """
         lrm_of_all_nodes = self.xml.getElementsByTagName('lrm')
         if len(lrm_of_all_nodes) == 0:
@@ -554,11 +575,19 @@ class CIB:
             node_data = self.decode_lrm_node(lrm_of_single_node)
             self.interface.debug('Node: %s' % node_id, 2, 1)
             self.nodes[node_id] = node_data
+        return self.nodes
 
     def determine_resource_status(self, ops):
+        """
+        Determite the status of a resource by analyzing
+        last lrm operations.
+        @param ops: Operations array
+        @return: Resource status string
+        """
         last_op = None
 
         for op in ops:
+            self.interface.debug('Status Op: %s' % op, 3, 3)
             # skip incomplite ops
             if not op.get('op-status', None) == '0':
                 continue
@@ -583,6 +612,7 @@ class CIB:
         else:
             status = 'stop'
 
+        self.interface.debug('Status: %s' % status, 3, 3)
         return status
 
 ###########################################################################################################
@@ -591,5 +621,4 @@ if __name__ == '__main__':
     interface = Interface()
     interface.create_cib()
     interface.cib.decode_lrm()
-    #interface.show_cib_nodes()
     interface.print_table()
