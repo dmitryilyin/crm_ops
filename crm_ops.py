@@ -180,7 +180,7 @@ class Interface:
         self.running_color = Color(fgcode='green', brightfg=True)
         self.not_running_color = Color(fgcode=5, attrcode=0, enabled=True, brightfg=True, brightbg=False)
         self.debug_color = Color(fgcode=6, bgcode=5, attrcode=1, enabled=True, brightfg=False, brightbg=False)
-        self.primitive_name_color = Color(fgcode='blue')
+        self.title_color = Color(fgcode='blue')
 
         self.ocf_rc_codes = {
             '0': self.running_color('Success'),
@@ -259,6 +259,16 @@ class Interface:
         else:
             return self.error_color('Unknown!')
 
+    def status_color(self, status, line):
+        status = str(status)
+        line = str(line)
+        if status in ['promote', 'start']:
+            return self.running_color(line)
+        if status in ['stop']:
+            return self.not_running_color(line)
+        else:
+            return self.title_color(line)
+
     def print_resource(self, resource, offset=4):
         """
         Print resource description block
@@ -266,8 +276,9 @@ class Interface:
         @param offset:
         """
         resource = resource.copy()
-        resource['id'] = self.primitive_name_color(resource['id'])
-        line = "> %(id)s (%(class)s::%(provider)s::%(type)s)" % resource
+        resource['id'] = self.status_color(resource['status'], resource['id'])
+        resource['status-string'] = self.status_color(resource['status'], resource['status'].title())
+        line = "> %(id)s (%(class)s::%(provider)s::%(type)s) %(status-string)s" % resource
         self.puts(line, offset)
 
     def seconds_to_time(self, seconds_from, seconds_to=None, msec=False):
@@ -499,7 +510,7 @@ class CIB:
             resource['ops'].append(op)
 
         resource['ops'].sort(key=lambda o: o.get('call_id', '0'))
-        resource['role'] = self.determine_resource_role(resource['ops'])
+        resource['status'] = self.determine_resource_status(resource['ops'])
 
         return resource
 
@@ -544,8 +555,35 @@ class CIB:
             self.interface.debug('Node: %s' % node_id, 2, 1)
             self.nodes[node_id] = node_data
 
-    def determine_resource_role(self, ops):
-        return 'Started'
+    def determine_resource_status(self, ops):
+        last_op = None
+
+        for op in ops:
+            # skip incomplite ops
+            if not op.get('op-status', None) == '0':
+                continue
+
+            # skip useless operations
+            if not op.get('operation', None) in ['start', 'stop', 'monitor', 'promote']:
+                continue
+
+            # skip unsuccessfull operations
+            if not (op.get('rc-code', None) == '0' or op.get('operation', None) == 'monitor'):
+                continue
+
+            last_op = op
+
+        if not last_op:
+            return '?'
+
+        if last_op.get('operation', None) in ['promote', 'start', 'stop']:
+            status = last_op['operation']
+        elif last_op.get('rc-code', None) in ['0', '8']:
+            status = 'start'
+        else:
+            status = 'stop'
+
+        return status
 
 ###########################################################################################################
 
