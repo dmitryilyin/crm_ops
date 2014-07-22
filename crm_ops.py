@@ -1,11 +1,8 @@
 #!/usr/bin/env python
-import os
 import sys
 import subprocess
 import pprint
 import argparse
-import time
-import datetime
 from xml.dom.minidom import *
 
 
@@ -200,6 +197,7 @@ class Interface:
 
         self.parser = argparse.ArgumentParser()
         self.parser.add_argument("-d", "--debug", help="debug output", type=int, choices=[0, 1, 2, 3], default=0)
+        self.parser.add_argument("-v", "--verbose", help="show more information", action='store_true')
         self.parser.add_argument("-n", "--node", help="filter by node name", type=str)
         self.parser.add_argument("-p", "--primitive", help="filter by primitive name", type=str)
         self.parser.add_argument("-f", "--file", help="read CIB from file instead of Pacemaker", type=str)
@@ -261,12 +259,6 @@ class Interface:
         else:
             return self.error_color('Unknown!')
 
-    def msec_to_sec(self, msec):
-        try:
-           return str(float(msec) / 1000) + ' s'
-        except:
-           return '?'
-
     def print_resource(self, resource, offset=4):
         """
         Print resource description block
@@ -278,15 +270,71 @@ class Interface:
         line = "> %(id)s (%(class)s::%(provider)s::%(type)s)" % resource
         self.puts(line, offset)
 
-    def sec_since(self, timestamp):
+    def seconds_to_time(self, seconds_from, seconds_to=None, msec=False):
+        seconds_in_day = 86400
+        seconds_in_hour = 3600
+        seconds_in_minute = 60
+        miliseconds_in_second = 1000
+
         try:
-            timestamp = int(timestamp)
-            current_timestamp = time.time()
-            seconds_since = current_timestamp - timestamp
-            datetime_since = datetime.timedelta(seconds=seconds_since)
-            return str(datetime_since)
-        except:
-            return timestamp
+            if seconds_to is None:
+                import time
+                seconds_to = time.time()
+            elif msec:
+                seconds_to = float(seconds_to) / miliseconds_in_second
+            else:
+                seconds_to = float(seconds_to)
+
+            if msec:
+                seconds_from = float(seconds_from) / miliseconds_in_second
+            else:
+                seconds_from = float(seconds_from)
+
+        except TypeError:
+            return '?'
+
+        seconds = abs(seconds_to - seconds_from)
+
+        if seconds > seconds_in_day:
+            days = int(seconds / seconds_in_day)
+            seconds -= seconds_in_day * days
+        else:
+            days = 0
+
+        if seconds > seconds_in_hour:
+            hours = int(seconds / seconds_in_hour)
+            seconds -= seconds_in_hour * hours
+        else:
+            hours = 0
+
+        if seconds > seconds_in_minute:
+            minutes = int(seconds / seconds_in_minute)
+            seconds -= seconds_in_minute * minutes
+        else:
+            minutes = 0
+
+        seconds, miliseconds = int(seconds), int((seconds - int(seconds)) * miliseconds_in_second)
+
+        return_string = []
+
+        if days > 0:
+            return_string.append(str(days) + 'd')
+
+        if hours > 0:
+            return_string.append(str(hours) + 'h')
+
+        if minutes > 0:
+            return_string.append(str(minutes) + 'm')
+
+        # show at least seconds even if all is zero
+        if seconds > 0 or miliseconds == 0:
+            return_string.append(str(seconds) + 's')
+
+        # who cares about miliseconds when we are talking about minutes
+        if miliseconds > 0 and minutes == 0:
+            return_string.append(str(miliseconds) + 'ms')
+
+        return ':'.join(return_string)
 
     def print_op(self, op, offset=8):
         """
@@ -296,15 +344,44 @@ class Interface:
         """
         op = op.copy()
         self.debug(str(op), 3)
-        op['rc-code-string'] = self.rc_code_to_string(op.get('rc-code', '?'))
-        op['exec-time-sec'] = self.msec_to_sec(op.get('exec-time', '?'))
-        op['last-run-sec'] = self.sec_since(op.get('last-run', '?'))
-        op['last-rc-change-sec'] = self.sec_since(op.get('last-rc-change', '?'))
-        op['interval-sec'] = self.msec_to_sec(op.get('interval', '?'))
-        line = '* %(operation)s %(rc-code-string)s' % op
+        op['rc-code-string'] = self.rc_code_to_string(op.get('rc-code', None))
+
+        if 'interval' in op:
+            op['interval-string'] = self.seconds_to_time(op['interval'], 0, msec=True)
+
+        if ('interval' in op) and (op['interval'] != '0'):
+            op['operation-string'] = '%s (%s)' % (op['operation'], op['interval-string'])
+        else:
+            op['operation-string'] = op['operation']
+
+        line = '* %(operation-string)s %(rc-code-string)s' % op
         self.puts(line, offset)
-        line = 'Origin: %(crm-debug-origin)s Run: %(last-run-sec)s Change: %(last-rc-change-sec)s Exec: %(exec-time-sec)s Interval: %(interval-sec)s' % op
-        self.puts(line, offset + 2)
+
+        if self.args.verbose:
+            # calculate and show timings
+            if 'exec-time' in op:
+                op['exec-time-sec'] = self.seconds_to_time(op['exec-time'], 0, msec=True)
+
+            if 'last-run' in op:
+                op['last-run-sec'] = self.seconds_to_time(op['last-run'])
+
+            if 'last-rc-change' in op:
+                op['last-rc-change-sec'] = self.seconds_to_time(op['last-rc-change'])
+
+            line = 'Origin: %(crm-debug-origin)s' % op
+            if 'last-run-sec' in op:
+                line += ' LastRun: %(last-run-sec)s' % op
+
+            if 'last-rc-change-sec' in op:
+                line += ' LastChange: %(last-rc-change-sec)s' % op
+
+            if 'exec-time-sec' in op:
+                line += ' ExecTime: %(exec-time-sec)s' % op
+            #
+            # if 'interval-string' in op:
+            #     line += ' Interval: %(interval-string)s' % op
+
+            self.puts(line, offset + 2)
 
     def print_node(self, node):
         """
