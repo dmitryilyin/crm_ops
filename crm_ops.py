@@ -3,6 +3,7 @@ import sys
 import subprocess
 import pprint
 import argparse
+import time
 from xml.dom.minidom import *
 
 
@@ -302,7 +303,6 @@ class Interface:
 
         try:
             if seconds_to is None:
-                import time
                 seconds_to = time.time()
             elif msec:
                 seconds_to = float(seconds_to) / miliseconds_in_second
